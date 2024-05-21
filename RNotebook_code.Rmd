@@ -1,0 +1,357 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(psych)  # For factor analysis
+library(readr)
+
+```
+
+```{r}
+#Reading the csv file
+data <- read_csv("/Users/NAZ/Downloads/Thesis19.csv")
+glimpse(data)
+```
+
+```{r}
+#Changing colum names so they wouldn't be confused with the independent variables
+data <- data %>%
+  rename(
+    `Language` = `Explainability level`,  
+    `Visual` = `Visual design`
+  ) %>%
+  slice(-1)  
+
+```
+
+
+```{r}
+#Setting the survey answers as numeric values
+data <- data %>%
+  mutate(
+   
+    across(c(Q1:Q6, Q11:Q16), as.numeric),
+    across(Q17:Q20, as.numeric),
+    across(Q21:Q24, as.numeric),
+    across(Q25:Q36, as.numeric),
+
+    SC0 = as.numeric(SC0),
+    SC1 = as.numeric(SC1),
+#Setting the different conditions as factors
+    `Condition` = as.factor(`Condition`),
+    `Language` = as.factor(`Language`),
+    `Visual` = as.factor(`Visual`)
+  )
+
+# Remove rows with any missing data
+data <- na.omit(data)
+glimpse(data)
+
+```
+```{r}
+library(stringr)
+
+# To ensure correct formatting in the Condition column 
+data$Condition <- data$Condition %>%
+  str_replace_all("\\s+", " ") %>%      # Replace multiple spaces with a single space
+  str_trim() %>%                        # Trim leading and trailing spaces
+  str_replace_all(" - ", "-") %>%       # Ensure single spaces around the hyphen
+  str_replace_all("-", " - ")           # Add spaces around the hyphen
+
+unique(data$Condition)
+
+
+
+```
+
+
+```{r}
+data$explainability <- (data$Q17+ data$Q18+ data$Q19 + data$Q20) / 4
+data$visualdesign <- (data$Q21+ data$Q22+ data$Q23 + data$Q24) / 4
+data$trust <- (data$Q25+ data$Q26+ data$Q27 + data$Q28) / 4
+data$satisfaction <- (data$Q29+ data$Q30+ data$Q31 + data$Q32) / 4
+data$adherence <- (data$Q33+ data$Q34+ data$Q35 + data$Q36) / 4
+data$knowledge_gain <- data$SC1 - data$SC0
+
+head(data)
+
+boxplot(trust ~ Condition, data = data)
+boxplot(satisfaction ~ Condition, data = data)
+boxplot(adherence ~ Condition, data = data)
+```
+```{r}
+library(dplyr)
+
+boxplot(data$trust )
+boxplot(data$adherence)
+boxplot(data$satisfaction)
+```
+```{r}
+#To observe participant number for each 4 contition
+conditionsum <- (table(data$Condition))
+conditionsum
+```
+
+```{r}
+#To observe participant number per individual condition 
+visualsum <- (table(data$Visual))
+languagesum <- (table(data$Language))
+visualsum
+languagesum
+
+```
+
+```{r}
+
+# Perform a t-test to compare Knowledge Gain between T and NT conditions
+t_test_knowledge_gain <- t.test(knowledge_gain ~ Language, data = data)
+print(t_test_knowledge_gain)
+
+# Create a boxplot for Knowledge Gain
+ggplot(data, aes(x = Language, y = knowledge_gain, fill = Language)) +
+  geom_boxplot() +
+  labs(title = "Comparison of Knowledge Gain Between Language Types", x = "Language Type", y = "Knowledge Gain") +
+  theme_minimal()
+
+```
+
+
+```{r}
+library(psych) #for the KMO test
+
+# Perform the KMO test on the filtered data for relevant questions
+kmo_data <- select(data, Q17:Q36)
+kmo_result <- KMO(kmo_data)
+print(kmo_result)
+```
+
+```{r}
+# Perform factor analysis 
+fa_result <- fa(r = cor(kmo_data, use = "pairwise.complete.obs"), nfactors = 4, rotate = "varimax")
+print(fa_result)  
+print(loadings(fa_result), cutoff = 0.3)  
+
+```
+
+```{r}
+# Rename the columns for clarity
+data <- data %>%
+  mutate(User_Engagement = satisfaction + adherence)
+
+# Average of the satisfaction and adherence scores
+data <- data %>%
+  rowwise() %>%
+  mutate(User_Engagement = mean(c(satisfaction, adherence), na.rm = TRUE))
+
+```
+
+```{r}
+library(lavaan)
+
+# Define the model
+model <- '
+  Explainability =~ Q17 + Q18 + Q19 + Q20
+  VisualDesign =~ Q21 + Q22 + Q23 + Q24
+  Trust =~ Q25 + Q26 + Q27 + Q28
+  UserEngagement =~ Q29 + Q30 + Q31 + Q32 + Q33 + Q34 + Q35 + Q36
+'
+
+# Fit the model
+fit <- cfa(model, data = kmo_data)
+
+# Summary of the model fit
+summary(fit, fit.measures = TRUE)
+
+```
+
+```{r}
+
+# Cronbach's Alpha for each factor
+alpha_explainability <- alpha(data[, c("Q17", "Q18", "Q19", "Q20")])$total$raw_alpha
+alpha_visualdesign <- alpha(data[, c("Q21", "Q22", "Q23", "Q24")])$total$raw_alpha
+alpha_trust <- alpha(data[, c("Q25", "Q26", "Q27", "Q28")])$total$raw_alpha
+alpha_satisfaction_adherence <- alpha(data[, c("Q29", "Q30", "Q31", "Q32", "Q33", "Q34", "Q35", "Q36")])$total$raw_alpha
+
+
+cat("Cronbach's Alpha for Explainability:", alpha_explainability, "\n")
+cat("Cronbach's Alpha for Visual Design:", alpha_visualdesign, "\n")
+cat("Cronbach's Alpha for Trust:", alpha_trust, "\n")
+cat("Cronbach's Alpha for User Engagement:", alpha_satisfaction_adherence, "\n")
+
+```
+
+
+```{r}
+
+# to verify column names
+str(data)
+
+# Perform t-test for Explainability Level (Language: T vs. NT)
+t_test_explainability <- t.test(explainability ~ Language, data = data)
+print(t_test_explainability)
+
+# Perform t-test for Visual Design (Visual: C vs. NC)
+t_test_visual <- t.test(visualdesign ~ Visual, data = data)
+print(t_test_visual)
+
+# Boxplots for visualization
+library(ggplot2)
+
+# Boxplot for Explainability Level
+ggplot(data, aes(x = Language, y = explainability, fill = Language)) +
+  geom_boxplot() +
+  labs(title = "Explainability Level by Language Type", x = "Language Type", y = "Explainability Level") +
+  theme_minimal()
+
+# Boxplot for Visual Design
+ggplot(data, aes(x = Visual, y = visualdesign, fill = Visual)) +
+  geom_boxplot() +
+  labs(title = "Visual Design by Visual Type", x = "Visual Type", y = "Visual Design") +
+  theme_minimal()
+
+```
+
+
+```{r}
+library(car)
+library(dplyr)
+library(ggplot2)
+
+# Defining dependent variables
+dependent_vars <- cbind(data$trust, data$User_Engagement)
+
+# Perform MANOVA
+manova_result <- manova(dependent_vars ~ Language * Visual, data = data)
+summary_manova <- summary(manova_result, test = "Wilks")
+print(summary_manova)
+
+# Extract Wilks' Lambda statistics
+wilks_stats <- summary_manova$stats
+colnames(wilks_stats)
+
+# Create a data frame for Wilks' Lambda table
+wilks_table <- data.frame(
+  Effect = rownames(wilks_stats)[-4],  # Exclude the Residuals row
+  Wilks_Lambda = wilks_stats[-4, "Wilks"],
+  approx_F = wilks_stats[-4, "approx F"],
+  num_Df = wilks_stats[-4, "num Df"],
+  den_Df = wilks_stats[-4, "den Df"],
+  Pr = wilks_stats[-4, "Pr(>F)"]
+)
+
+print(wilks_table)
+```
+
+```{r}
+library(dplyr)
+
+# Perform ANOVA for Trust
+aov_trust <- aov(trust ~ Language * Visual, data = data)
+summary_aov_trust <- summary(aov_trust)
+print(summary_aov_trust)
+
+# Descriptive statistics for Trust by Visual Design
+descriptive_stats_visual <- data %>%
+  group_by(Visual) %>%
+  summarise(
+    mean_trust = mean(trust, na.rm = TRUE),
+    sd_trust = sd(trust, na.rm = TRUE),
+    N = n(),
+    .groups = 'drop'
+  ) %>%
+  mutate(Independent_Variable = "Visual Design") %>%
+  rename(Condition = Visual)
+
+# Descriptive statistics for Trust by Explainability Level
+descriptive_stats_language <- data %>%
+  group_by(Language) %>%
+  summarise(
+    mean_trust = mean(trust, na.rm = TRUE),
+    sd_trust = sd(trust, na.rm = TRUE),
+    N = n(),
+    .groups = 'drop'
+  ) %>%
+  mutate(Independent_Variable = "Explainability Level") %>%
+  rename(Condition = Language)
+
+# Combine both tables
+descriptive_stats_trust <- bind_rows(descriptive_stats_visual, descriptive_stats_language)
+
+# Adjust column names and order for the final table
+descriptive_stats_trust <- descriptive_stats_trust %>%
+  rename(
+    `Mean Trust` = mean_trust,
+    `SD Trust` = sd_trust
+  ) %>%
+  select(Independent_Variable, Condition, `Mean Trust`, `SD Trust`, N)
+
+# Print the final table
+print(descriptive_stats_trust)
+kable(descriptive_stats_trust, caption = "Descriptive statistics Trust")
+
+
+```
+
+
+```{r}
+library(dplyr)
+
+# Perform ANOVA for User Engagement
+aov_usereng <- aov(User_Engagement ~ Language * Visual, data = data)
+summary_aov_usereng <- summary(aov_usereng)
+print(summary_aov_usereng)
+
+# Descriptive statistics for User Engagement by Visual Design
+descriptive_stats_visual <- data %>%
+  group_by(Visual) %>%
+  summarise(
+    mean_usereng = mean(User_Engagement, na.rm = TRUE),
+    sd_usereng = sd(User_Engagement, na.rm = TRUE),
+    N = n(),
+    .groups = 'drop'
+  ) %>%
+  mutate(Independent_Variable = "Visual Design") %>%
+  rename(Condition = Visual)
+
+# Descriptive statistics for User Engagement by Explainability Level
+descriptive_stats_language <- data %>%
+  group_by(Language) %>%
+  summarise(
+    mean_usereng = mean(User_Engagement, na.rm = TRUE),
+    sd_usereng = sd(User_Engagement, na.rm = TRUE),
+    N = n(),
+    .groups = 'drop'
+  ) %>%
+  mutate(Independent_Variable = "Explainability Level") %>%
+  rename(Condition = Language)
+
+# Combine both tables
+descriptive_stats_usereng <- bind_rows(descriptive_stats_visual, descriptive_stats_language)
+
+# Adjust column names and order for the final table
+descriptive_stats_usereng <- descriptive_stats_usereng %>%
+  rename(
+    `Mean User Engagement` = mean_usereng,
+    `SD User Engagement` = sd_usereng
+  ) %>%
+  select(Independent_Variable, Condition, `Mean User Engagement`, `SD User Engagement`, N)
+
+# Print the final table
+print(descriptive_stats_usereng)
+kable(descriptive_stats_usereng, caption = "Descriptive statistics User Engagement")
+
+```
+
+
+
+
